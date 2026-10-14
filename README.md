@@ -15,6 +15,10 @@ page draws it.
   nothing.
 - **Everything shows:** scripts, the system menus, and the screen with no script
   loaded.
+- **More than the device:** a panel with every parameter of the running script as
+  sliders, menus and buttons, live as they change; the mixer, reverb, compressor
+  and clock; a script browser that loads a script with a click; output level
+  meters; screenshots; screen colors.
 - **Any device:** a Mac, PC, tablet or phone on the same network. Nothing to
   install besides the mod; the relay uses only Python's standard library, which
   every norns has.
@@ -55,14 +59,21 @@ step is one step on the norns: the norns needs several encoder ticks per step
 
 ## How it works
 
-- `lib/mod.lua`, the mod: starts the relay. While the relay says a browser is
-  connected, it reads the screen 30 times a second with `screen.peek`, and sends
-  it over OSC (one letter per pixel) when it changed. It also turns knob steps
-  from the relay into encoder ticks.
-- `relay.py`: serves the page and a websocket on port 8099. It sends each screen to
-  the browsers as 8192 levels, zlib-compressed, and passes keys to matron's
-  `/remote/key` OSC command and knob steps to the mod.
+- `lib/mod.lua`, the mod: starts the relay and hooks `lib/remote.lua` into matron.
+- `lib/remote.lua`: while the relay says a browser is connected, it reads the
+  screen 30 times a second with `screen.peek` and sends it over OSC (one letter per
+  pixel) when it changed. It sends the parameter list when a script loads, the
+  values that changed 5 times a second, and the output levels 15 times a second,
+  as JSON. It runs the commands the relay passes on: knob steps (turned into the
+  right number of encoder ticks), parameter changes, script loads.
+- `relay.py`: serves the page and a websocket on port 8099, sends each screen to
+  the browsers as 8192 levels, zlib-compressed, passes the JSON on, lists the
+  installed scripts, and sends keys to matron's `/remote/key` OSC command and
+  everything else to the mod.
 - `index.html`: the page.
+
+To try a change to `lib/remote.lua` without restarting the norns, reload it from
+maiden's REPL: `norns_remote = dofile(paths.code .. "norns-remote/lib/remote.lua")`.
 
 Anyone on your network can open the page and control the norns, as they can
 already with maiden. The relay listens on port 8099; the mod and the relay talk on

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""norns-remote relay: the norns screen to browsers, their keys and knobs back.
+"""norns-remote relay: the norns screen and parameters to browsers, their input back.
 
-The norns-remote mod (lib/mod.lua) sends the screen here over OSC, one letter per
-pixel. Browsers get it over a websocket as 8192 levels (0-15), zlib-compressed,
-and send back key presses and knob turns: keys go to matron's own /remote/key
-OSC command, turns to the mod's /norns-remote/enc, which counts them in steps.
-The page itself (index.html) is served on the same port.
+The mod (lib/remote.lua) sends the screen here over OSC, one letter per pixel, and
+parameters and levels as JSON text. Browsers get the screen over a websocket as
+8192 levels (0-15), zlib-compressed, and the JSON as is. They send back keys, knob
+turns and parameter changes: keys go to matron's own /remote/key OSC command, the
+rest to the mod's /norns-remote/<command>. The relay itself lists the installed
+scripts, and serves the page (index.html) on the same port.
 
 Standard library only, so it runs on the norns' stock Python 3.9.
 """
@@ -18,9 +19,11 @@ import struct
 import zlib
 
 HTTP_PORT = int(os.environ.get("NORNS_REMOTE_PORT", "8099"))
-SCREEN_PORT = 10112                # mod -> relay, on localhost
+FROM_MOD_PORT = 10112              # mod -> relay, on localhost
 MATRON = ("127.0.0.1", 10111)      # matron's OSC port
-PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+HERE = os.path.dirname(os.path.abspath(__file__))
+PAGE = os.path.join(HERE, "index.html")
+CODE = os.path.dirname(HERE)       # dust/code, where the scripts are
 WS_GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 LEVELS = bytes((i - 65) & 0x0F for i in range(256))  # "A".."P" -> 0..15
 MAX_BACKLOG = 64 * 1024            # skip frames for a client this far behind
@@ -28,14 +31,20 @@ MAX_BACKLOG = 64 * 1024            # skip frames for a client this far behind
 clients = set()
 last_frame = None
 matron = None                      # datagram transport, also used to send
-PAGE_BODY = b""
 
 
-def osc(path, *ints):
+def osc(path, *args):
     def pad(b):
         return b + b"\0" * (4 - len(b) % 4)
-    return (pad(path.encode()) + pad(("," + "i" * len(ints)).encode())
-            + struct.pack(f">{len(ints)}i", *ints))
+    tags, data = ",", b""
+    for a in args:
+        if isinstance(a, int):
+            tags, data = tags + "i", data + struct.pack(">i", a)
+        elif isinstance(a, float):
+            tags, data = tags + "f", data + struct.pack(">f", a)
+        else:
+            tags, data = tags + "s", data + pad(str(a).encode())
+    return pad(path.encode()) + pad(tags.encode()) + data
 
 
 def osc_string(packet):
@@ -63,16 +72,23 @@ def ws_send(writer, payload, opcode=0x2):
     writer.write(head + payload)
 
 
-class Screen(asyncio.DatagramProtocol):
+def broadcast(payload, opcode):
+    for writer in list(clients):
+        if writer.transport.get_write_buffer_size() < MAX_BACKLOG:
+            ws_send(writer, payload, opcode)
+
+
+class FromMod(asyncio.DatagramProtocol):
     def datagram_received(self, data, _addr):
         global last_frame
-        path, pixels = osc_string(data)
-        if pixels is None or path != b"/norns-remote/screen" or len(pixels) != 128 * 64:
+        path, arg = osc_string(data)
+        if arg is None:
             return
-        last_frame = zlib.compress(pixels.translate(LEVELS), 1)
-        for writer in list(clients):
-            if writer.transport.get_write_buffer_size() < MAX_BACKLOG:
-                ws_send(writer, last_frame)
+        if path == b"/norns-remote/screen" and len(arg) == 128 * 64:
+            last_frame = zlib.compress(arg.translate(LEVELS), 1)
+            broadcast(last_frame, 0x2)
+        elif path == b"/norns-remote/json":
+            broadcast(arg, 0x1)
 
 
 def ping(new=False):
@@ -87,20 +103,49 @@ async def pinger():
             ping()
 
 
-def handle_input(text):
-    if matron is None:
-        return
+def scripts():
+    """The installed scripts, named as the norns SELECT menu names them."""
+    found = []
+    for folder in sorted(os.listdir(CODE), key=str.lower):
+        path = os.path.join(CODE, folder)
+        if folder.startswith(".") or not os.path.isdir(path):
+            continue
+        for name in sorted(os.listdir(path), key=str.lower):
+            if name.endswith(".lua") and os.path.isfile(os.path.join(path, name)):
+                stem = name[:-4]
+                found.append({"name": folder if stem == folder else f"{folder}/{stem}",
+                              "path": os.path.join(path, name)})
+    return found
+
+
+def to_matron(command, *args):
+    if matron is not None:
+        matron.sendto(osc("/norns-remote/" + command, *args), MATRON)
+
+
+def handle_input(writer, text):
     try:
         msg = json.loads(text)
         if "key" in msg:
             n, z = (int(v) for v in msg["key"])
-            if n in (1, 2, 3) and z in (0, 1):
+            if n in (1, 2, 3) and z in (0, 1) and matron is not None:
                 matron.sendto(osc("/remote/key", n, z), MATRON)
         elif "enc" in msg:
             n, d = (int(v) for v in msg["enc"])
             if n in (1, 2, 3) and -64 <= d <= 64 and d:
-                matron.sendto(osc("/norns-remote/enc", n, d), MATRON)
-    except (ValueError, TypeError, KeyError):
+                to_matron("enc", n, d)
+        elif "set" in msg or "raw" in msg or "delta" in msg:
+            command = next(c for c in ("set", "raw", "delta") if c in msg)
+            i, v = msg[command]
+            to_matron(command, int(i), float(v))
+        elif "trig" in msg:
+            to_matron("trig", int(msg["trig"]))
+        elif "load" in msg:
+            if any(s["path"] == msg["load"] for s in scripts()):
+                to_matron("load", msg["load"])
+        elif "scripts" in msg:
+            ws_send(writer, json.dumps({"type": "scripts", "list": scripts()}).encode(), 0x1)
+    except (ValueError, TypeError, KeyError, StopIteration, OSError):
         pass
 
 
@@ -138,11 +183,16 @@ async def websocket(reader, writer, headers):
             if opcode == 0x9:
                 ws_send(writer, payload, 0xA)
             elif opcode == 0x1:
-                handle_input(payload.decode("utf-8", "replace"))
+                handle_input(writer, payload.decode("utf-8", "replace"))
     except (asyncio.IncompleteReadError, ConnectionError):
         pass
     finally:
         clients.discard(writer)
+
+
+def read_page():
+    with open(PAGE, "rb") as fh:
+        return fh.read()
 
 
 async def handle(reader, writer):
@@ -155,7 +205,7 @@ async def handle(reader, writer):
         if path == "/ws" and headers.get("upgrade", "").lower() == "websocket":
             await websocket(reader, writer, headers)
         elif path in ("/", "/index.html"):
-            body = PAGE_BODY
+            body = await asyncio.to_thread(read_page)  # read each time: edits show on reload
             writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
                          b"Cache-Control: no-cache\r\nContent-Length: %d\r\n"
                          b"Connection: close\r\n\r\n" % len(body) + body)
@@ -175,7 +225,7 @@ async def main():
     loop = asyncio.get_running_loop()
     try:
         matron, _ = await loop.create_datagram_endpoint(
-            Screen, local_addr=("127.0.0.1", SCREEN_PORT))
+            FromMod, local_addr=("127.0.0.1", FROM_MOD_PORT))
         server = await asyncio.start_server(handle, port=HTTP_PORT)
     except OSError as exc:  # the mod starts a relay at every matron start
         print(f"norns-remote: not starting, ports in use ({exc})", flush=True)
@@ -186,6 +236,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    with open(PAGE, "rb") as fh:
-        PAGE_BODY = fh.read()
     asyncio.run(main())

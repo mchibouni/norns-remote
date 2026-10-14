@@ -7,76 +7,177 @@
 <style>
   :root {
     --bg: #111;
-    --panel: #1d1d1d;
-    --edge: #2a2a2a;
-    --text: #8a8a8a;
-    --dim: #555;
+    --panel: #1b1b1b;
+    --raised: #232323;
+    --edge: #2c2c2c;
+    --text: #c8c8c8;
+    --soft: #8a8a8a;
+    --dim: #5a5a5a;
     --cap: #2b2b2b;
     --cap-on: #e8e8e8;
+    --accent: #e8e8e8;
     --live: #6c6;
     --dead: #c55;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     font: 13px/1.4 -apple-system, system-ui, sans-serif; }
-  body { display: flex; align-items: center; justify-content: center; padding: 16px; }
-  .device { width: min(760px, 100%); background: var(--panel); border: 1px solid var(--edge);
-    border-radius: 14px; padding: 22px 22px 16px; user-select: none; -webkit-user-select: none; }
-  .bezel { position: relative; background: #000; border-radius: 6px; padding: 5% 6%; }
+  body { padding: 16px; }
+  .app { display: grid; gap: 16px; max-width: 1240px; margin: 0 auto; align-items: start;
+    grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 980px) {
+    .app { grid-template-columns: minmax(0, 560px) minmax(0, 1fr); height: calc(100vh - 32px); }
+    .panel { height: 100%; }
+  }
+
+  /* the device */
+  .device { background: var(--panel); border: 1px solid var(--edge); border-radius: 14px;
+    padding: 20px 20px 14px; user-select: none; -webkit-user-select: none; }
+  .screenrow { display: flex; gap: 10px; align-items: stretch; }
+  .bezel { position: relative; flex: 1; background: #000; border-radius: 6px; padding: 5% 6%; }
   canvas { display: block; width: 100%; aspect-ratio: 2 / 1; image-rendering: pixelated; }
   .offline { position: absolute; inset: 0; display: flex; align-items: center;
     justify-content: center; color: var(--dim); font-size: 14px; }
-  .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 22px; }
-  .col { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-  .knob { width: 64px; height: 64px; border-radius: 50%; background: var(--cap);
+  .meters { display: flex; gap: 4px; padding: 6px 0; }
+  .meter { width: 7px; background: #0b0b0b; border-radius: 3px; position: relative; overflow: hidden; }
+  .meter i { position: absolute; left: 0; right: 0; bottom: 0; height: 0;
+    background: linear-gradient(to top, #4c4 0%, #4c4 70%, #dd4 85%, #e55 100%);
+    background-size: 100% var(--h, 200px); background-position: bottom; }
+  .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 20px; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .knob { width: 60px; height: 60px; border-radius: 50%; background: var(--cap);
     border: 1px solid #383838; position: relative; cursor: ns-resize; touch-action: none; }
-  .knob::after { content: ""; position: absolute; left: 50%; top: 6px; width: 3px; height: 16px;
-    margin-left: -1.5px; border-radius: 2px; background: #bbb; }
   .knob .dial { position: absolute; inset: 0; transition: transform 60ms linear; }
-  .key { width: 40px; height: 40px; border-radius: 50%; background: var(--cap);
+  .knob .dial::after { content: ""; position: absolute; left: 50%; top: 6px; width: 3px;
+    height: 15px; margin-left: -1.5px; border-radius: 2px; background: #bbb; }
+  .key { width: 38px; height: 38px; border-radius: 50%; background: var(--cap);
     border: 1px solid #383838; cursor: pointer; touch-action: none; }
   .key.on { background: var(--cap-on); }
   .label { font-size: 11px; letter-spacing: .08em; color: var(--dim); }
-  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 18px;
-    font-size: 11px; color: var(--dim); gap: 12px; flex-wrap: wrap; }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 16px;
+    font-size: 11px; color: var(--dim); gap: 10px; flex-wrap: wrap; }
   .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
     background: var(--dead); margin-right: 6px; vertical-align: 1px; }
   .dot.live { background: var(--live); }
-  kbd { font: 11px ui-monospace, monospace; color: var(--text); }
+  .tools { display: flex; gap: 6px; align-items: center; }
+  .legend { width: 100%; text-align: center; }
+  kbd { font: 11px ui-monospace, monospace; color: var(--soft); }
+  button, select, input[type=search] { font: inherit; color: var(--text); background: var(--raised);
+    border: 1px solid var(--edge); border-radius: 6px; padding: 3px 8px; }
+  button { cursor: pointer; }
+  button:hover, select:hover { border-color: #444; }
+
+  /* the panel */
+  .panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 14px;
+    display: flex; flex-direction: column; min-height: 320px; overflow: hidden; }
+  .tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--edge); }
+  .tab { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+    padding: 8px 12px; color: var(--soft); }
+  .tab.on { color: var(--text); border-bottom-color: var(--accent); }
+  .pane { flex: 1; overflow-y: auto; padding: 8px 14px 16px; display: none; }
+  .pane.on { display: block; }
+  .empty { color: var(--dim); padding: 24px 0; text-align: center; }
+  details { border-top: 1px solid var(--edge); }
+  details:first-child { border-top: none; }
+  summary { cursor: pointer; padding: 9px 0; color: var(--soft); font-size: 11px;
+    letter-spacing: .08em; text-transform: uppercase; }
+  .sep { padding: 12px 0 4px; color: var(--dim); font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; }
+  .row { display: grid; grid-template-columns: minmax(90px, 32%) minmax(0, 1fr) minmax(64px, auto);
+    gap: 10px; align-items: center; padding: 3px 0; min-height: 30px; }
+  .row .name { color: var(--soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .val { color: var(--text); text-align: right; font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+  .row select { width: 100%; }
+  .row button.on { background: var(--cap-on); color: #111; }
+  .stepper { display: flex; gap: 6px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .search { padding: 10px 14px 4px; display: none; }
+  .search.on { display: block; }
+  .search input { width: 100%; padding: 6px 10px; }
+  .script { display: flex; justify-content: space-between; padding: 7px 8px; border-radius: 6px;
+    cursor: pointer; color: var(--soft); }
+  .script:hover { background: var(--raised); color: var(--text); }
+  .script.current { color: var(--text); }
+  .script.current::after { content: "playing"; color: var(--live); font-size: 11px; }
 </style>
 </head>
 <body>
-<div class="device">
-  <div class="bezel">
-    <canvas id="screen" width="128" height="64"></canvas>
-    <div class="offline" id="offline">connecting to norns…</div>
-  </div>
-  <div class="controls">
-    <div class="col"><div class="knob" data-enc="1"><div class="dial"></div></div><span class="label">E1</span>
-      <div class="key" data-key="1"></div><span class="label">K1</span></div>
-    <div class="col"><div class="knob" data-enc="2"><div class="dial"></div></div><span class="label">E2</span>
-      <div class="key" data-key="2"></div><span class="label">K2</span></div>
-    <div class="col"><div class="knob" data-enc="3"><div class="dial"></div></div><span class="label">E3</span>
-      <div class="key" data-key="3"></div><span class="label">K3</span></div>
-  </div>
-  <div class="foot">
-    <span><span class="dot" id="dot"></span><span id="status">offline</span></span>
-    <span>
-      <kbd>Tab</kbd> K1 · <kbd>Esc</kbd> K2 · <kbd>Enter</kbd> K3 ·
-      <kbd>Shift ↑↓</kbd> E1 · <kbd>↑↓</kbd> E2 · <kbd>←→</kbd> E3
-    </span>
-  </div>
+<div class="app">
+  <section class="device">
+    <div class="screenrow">
+      <div class="bezel">
+        <canvas id="screen" width="128" height="64"></canvas>
+        <div class="offline" id="offline">connecting to norns…</div>
+      </div>
+      <div class="meters" title="output level">
+        <div class="meter"><i id="vu-l"></i></div>
+        <div class="meter"><i id="vu-r"></i></div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="col"><div class="knob" data-enc="1"><div class="dial"></div></div><span class="label">E1</span>
+        <div class="key" data-key="1"></div><span class="label">K1</span></div>
+      <div class="col"><div class="knob" data-enc="2"><div class="dial"></div></div><span class="label">E2</span>
+        <div class="key" data-key="2"></div><span class="label">K2</span></div>
+      <div class="col"><div class="knob" data-enc="3"><div class="dial"></div></div><span class="label">E3</span>
+        <div class="key" data-key="3"></div><span class="label">K3</span></div>
+    </div>
+    <div class="foot">
+      <span><span class="dot" id="dot"></span><span id="status">offline</span></span>
+      <span class="tools">
+        <select id="theme" title="screen color">
+          <option value="white">white</option><option value="amber">amber</option>
+          <option value="green">green</option><option value="ice">ice</option>
+        </select>
+        <button id="shot" title="save the screen as a PNG">screenshot</button>
+      </span>
+      <span class="legend">
+        <kbd>Tab</kbd> K1 · <kbd>Esc</kbd> K2 · <kbd>Enter</kbd> K3 ·
+        <kbd>Shift ↑↓</kbd> E1 · <kbd>↑↓</kbd> E2 · <kbd>←→</kbd> E3
+      </span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <nav class="tabs">
+      <button class="tab on" data-tab="script" id="tab-script">script</button>
+      <button class="tab" data-tab="mix">mix</button>
+      <button class="tab" data-tab="scripts">scripts</button>
+    </nav>
+    <div class="search" id="search"><input type="search" id="filter" placeholder="find a script"></div>
+    <div class="pane on" id="pane-script"><div class="empty">no parameters yet</div></div>
+    <div class="pane" id="pane-mix"><div class="empty">no parameters yet</div></div>
+    <div class="pane" id="pane-scripts"><div class="empty">loading the list…</div></div>
+  </section>
 </div>
 <script>
 "use strict";
-// The relay sends 128x64 levels (0-15), zlib-compressed, only when the screen changes.
-const canvas = document.getElementById("screen");
+const $ = (sel, el = document) => el.querySelector(sel);
+
+// Storage can be missing (private windows): every access is guarded.
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+// ---- screen -------------------------------------------------------------
+// The relay sends 128x64 levels (0-15), zlib-compressed, when the screen changes.
+const canvas = $("#screen");
 const ctx = canvas.getContext("2d");
 const image = ctx.createImageData(128, 64);
-const GRAY = Array.from({ length: 16 }, (_, v) => Math.round(255 * Math.pow(v / 15, 0.8)));
+const THEMES = { white: [255, 255, 255], amber: [255, 176, 40], green: [120, 255, 140],
+  ice: [150, 210, 255] };
+let palette = [];
+let lastPixels = null;
 
-let ws = null;
-let chain = Promise.resolve();
+function setTheme(name) {
+  const rgb = THEMES[name] || THEMES.white;
+  palette = Array.from({ length: 16 }, (_, v) => rgb.map((c) => Math.round(c * Math.pow(v / 15, 0.8))));
+  $("#theme").value = THEMES[name] ? name : "white";
+  store.set("norns-remote-theme", name);
+  if (lastPixels) draw(lastPixels);
+}
 
 async function inflate(buf) {
   const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("deflate"));
@@ -84,38 +185,261 @@ async function inflate(buf) {
 }
 
 function draw(px) {
+  lastPixels = px;
   const d = image.data;
   for (let i = 0, j = 0; i < 8192; i++, j += 4) {
-    const g = GRAY[px[i] & 15];
-    d[j] = g; d[j + 1] = g; d[j + 2] = g; d[j + 3] = 255;
+    const c = palette[px[i] & 15];
+    d[j] = c[0]; d[j + 1] = c[1]; d[j + 2] = c[2]; d[j + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
 }
 
-function online(yes) {
-  document.getElementById("dot").classList.toggle("live", yes);
-  document.getElementById("status").textContent = yes ? location.hostname : "offline";
-  document.getElementById("offline").style.display = yes ? "none" : "flex";
-}
+$("#theme").addEventListener("change", (e) => setTheme(e.target.value));
+$("#shot").addEventListener("click", () => {
+  const big = document.createElement("canvas");
+  big.width = 1024; big.height = 512;
+  const g = big.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  g.drawImage(canvas, 0, 0, 1024, 512);
+  big.toBlob((blob) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `norns-${script || "screen"}-${new Date().toISOString().slice(0, 19).replace(/:/g, "")}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+});
 
-function connect() {
-  ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.binaryType = "arraybuffer";
-  ws.onopen = () => online(true);
-  ws.onmessage = (e) => { chain = chain.then(() => inflate(e.data)).then(draw).catch(() => {}); };
-  ws.onclose = () => { online(false); setTimeout(connect, 1000); };
+// ---- output meters --------------------------------------------------------
+const vuEls = [$("#vu-l"), $("#vu-r")];
+const vuShown = [0, 0];
+let vuTarget = [0, 0];
+function vuHeight(amp) {  // -60..0 dBFS over the meter's height
+  const db = amp > 0 ? 20 * Math.log10(amp) : -100;
+  return Math.max(0, Math.min(1, (db + 60) / 60));
+}
+function animateMeters() {
+  for (let s = 0; s < 2; s++) {
+    const t = vuHeight(vuTarget[s]);
+    vuShown[s] = t > vuShown[s] ? t : Math.max(t, vuShown[s] - 0.02);  // fast up, slow down
+    const el = vuEls[s];
+    el.style.setProperty("--h", `${el.parentElement.clientHeight}px`);
+    el.style.height = `${vuShown[s] * 100}%`;
+  }
+  requestAnimationFrame(animateMeters);
+}
+requestAnimationFrame(animateMeters);
+
+// ---- connection -------------------------------------------------------------
+let ws = null;
+let chain = Promise.resolve();
+
+function online(yes) {
+  $("#dot").classList.toggle("live", yes);
+  $("#status").textContent = yes ? location.hostname : "offline";
+  $("#offline").style.display = yes ? "none" : "flex";
 }
 
 function send(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => { online(true); send({ scripts: 1 }); };
+  ws.onmessage = (e) => {
+    if (typeof e.data === "string") { received(JSON.parse(e.data)); return; }
+    chain = chain.then(() => inflate(e.data)).then(draw).catch(() => {});
+  };
+  ws.onclose = () => { online(false); setTimeout(connect, 1000); };
+}
+
+// ---- parameters ---------------------------------------------------------------
+// The mod sends the list in chunks (seq numbers each new list), then values
+// as [number, display string] by parameter index, only when they change.
+const T = { SEP: 0, NUMBER: 1, OPTION: 2, CONTROL: 3, FILE: 4, TAPER: 5, TRIGGER: 6,
+  GROUP: 7, TEXT: 8, BINARY: 9 };
+const SYSTEM_GROUPS = new Set(["LEVELS", "REVERB", "COMPRESSOR", "SOFTCUT", "CLOCK"]);
+let seq = -1, chunks = [], script = "";
+const rows = new Map();   // index -> {param, update(value)}
+const values = new Map(); // index -> [number, string]
+const busy = new Set();   // indexes the pointer is dragging: ignore their updates
+
+function received(m) {
+  if (m.type === "vu") { vuTarget = m.o; return; }
+  if (m.type === "scripts") { renderScripts(m.list); return; }
+  if (m.type === "params") {
+    if (m.seq !== seq) { seq = m.seq; chunks = []; }
+    chunks[m.chunk - 1] = m.list;
+    script = m.script;
+    if (chunks.filter(Boolean).length === m.chunks) renderParams(chunks.flat());
+    return;
+  }
+  if (m.type === "values") {
+    for (const [i, v] of Object.entries(m.v)) {
+      const n = +i;
+      values.set(n, v);
+      if (!busy.has(n)) rows.get(n)?.update(v);
+    }
+  }
+}
+
+// Throttled sender for sliders: at most one message per 40 ms, last one wins.
+const pending = new Map();
+function sendSoon(key, msg) {
+  if (!pending.has(key)) setTimeout(() => { send(pending.get(key)); pending.delete(key); }, 40);
+  pending.set(key, msg);
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function makeRow(p) {
+  const row = el("div", "row");
+  row.append(el("span", "name", p.name));
+  row.querySelector(".name").title = p.id || p.name;
+  const val = el("span", "val");
+  let control, update = (v) => { val.textContent = v[1]; };
+
+  if (p.t === T.CONTROL || p.t === T.TAPER || (p.t === T.NUMBER && p.max - p.min <= 2000)) {
+    control = el("input");
+    control.type = "range";
+    const raw = p.t !== T.NUMBER;
+    control.min = raw ? 0 : p.min; control.max = raw ? 1 : p.max; control.step = raw ? 0.001 : 1;
+    control.addEventListener("input", () =>
+      sendSoon(p.i, raw ? { raw: [p.i, +control.value] } : { set: [p.i, +control.value] }));
+    control.addEventListener("pointerdown", () => busy.add(p.i));
+    // Blur afterwards, so the arrow keys go back to the norns knobs.
+    const release = () => {
+      busy.delete(p.i); control.blur();
+      const v = values.get(p.i); if (v) update(v);
+    };
+    control.addEventListener("pointerup", release);
+    control.addEventListener("pointercancel", release);
+    update = (v) => { control.value = v[0]; val.textContent = v[1]; };
+  } else if (p.t === T.NUMBER) {
+    control = el("div", "stepper");
+    const down = el("button", "", "−"), up = el("button", "", "+");
+    down.onclick = () => send({ delta: [p.i, -1] });
+    up.onclick = () => send({ delta: [p.i, 1] });
+    control.append(down, up);
+  } else if (p.t === T.OPTION) {
+    control = el("select");
+    (p.options || []).forEach((o, k) => control.append(new Option(String(o), k + 1)));
+    control.addEventListener("change", () => { send({ set: [p.i, +control.value] }); control.blur(); });
+    update = (v) => { control.value = v[0]; val.textContent = ""; };
+  } else if (p.t === T.BINARY) {
+    control = el("button", "", p.behavior === "toggle" ? "on / off" : "press");
+    if (p.behavior === "momentary") {
+      control.addEventListener("pointerdown", () => send({ set: [p.i, 1] }));
+      control.addEventListener("pointerup", () => send({ set: [p.i, 0] }));
+    } else if (p.behavior === "toggle") {
+      control.onclick = () => send({ set: [p.i, values.get(p.i)?.[0] ? 0 : 1] });
+    } else {
+      control.onclick = () => send({ set: [p.i, 1] });
+    }
+    update = (v) => { control.classList.toggle("on", p.behavior === "toggle" && !!v[0]); val.textContent = ""; };
+  } else if (p.t === T.TRIGGER) {
+    control = el("button", "", "trigger");
+    control.onclick = () => send({ trig: p.i });
+  } else {
+    control = el("span");
+  }
+  row.append(control, val);
+
+  // Scrolling over a row nudges the value by one of its own steps.
+  if (p.t !== T.OPTION && p.t !== T.TEXT && p.t !== T.FILE && p.t !== T.TRIGGER) {
+    let acc = 0;
+    row.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      acc -= e.deltaY;
+      const steps = Math.trunc(acc / 40);
+      if (steps) { send({ delta: [p.i, steps] }); acc -= steps * 40; }
+    }, { passive: false });
+  }
+  rows.set(p.i, { update });
+  const v = values.get(p.i);
+  if (v) update(v);
+  return row;
+}
+
+function renderParams(list) {
+  rows.clear();
+  values.clear();
+  const panes = { script: $("#pane-script"), mix: $("#pane-mix") };
+  panes.script.replaceChildren(); panes.mix.replaceChildren();
+  for (let k = 0; k < list.length; k++) {
+    const p = list[k];
+    if (p.t === T.GROUP) {
+      const members = list.slice(k + 1, k + 1 + p.n);
+      k += p.n;
+      const visible = members.filter((m) => !m.hidden && m.t !== T.GROUP);
+      if (!visible.length) continue;
+      const box = el("details");
+      const system = SYSTEM_GROUPS.has(p.name);
+      box.open = !system || p.name === "LEVELS";
+      box.append(el("summary", "", p.name));
+      for (const m of visible) box.append(m.t === T.SEP ? el("div", "sep", m.name) : makeRow(m));
+      (system ? panes.mix : panes.script).append(box);
+    } else if (!p.hidden) {
+      panes.script.append(p.t === T.SEP ? el("div", "sep", p.name) : makeRow(p));
+    }
+  }
+  for (const pane of Object.values(panes)) {
+    if (!pane.children.length) pane.append(el("div", "empty", "no parameters"));
+  }
+  $("#tab-script").textContent = script || "script";
+  markCurrent();
+}
+
+// ---- scripts ------------------------------------------------------------------
+let scriptList = [];
+function renderScripts(list) {
+  scriptList = list;
+  const pane = $("#pane-scripts");
+  pane.replaceChildren();
+  const q = $("#filter").value.trim().toLowerCase();
+  for (const s of list) {
+    if (q && !s.name.toLowerCase().includes(q)) continue;
+    const item = el("div", "script");
+    item.dataset.name = s.name;
+    item.append(el("span", "", s.name));
+    item.onclick = () => send({ load: s.path });
+    pane.append(item);
+  }
+  if (!pane.children.length) pane.append(el("div", "empty", "no match"));
+  markCurrent();
+}
+function markCurrent() {
+  document.querySelectorAll(".script").forEach((s) => {
+    const name = s.dataset.name;
+    s.classList.toggle("current", name === script || name.endsWith("/" + script));
+  });
+}
+$("#filter").addEventListener("input", () => renderScripts(scriptList));
+
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t === tab));
+    document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("on", p.id === "pane-" + tab.dataset.tab));
+    $("#search").classList.toggle("on", tab.dataset.tab === "scripts");
+    if (tab.dataset.tab === "scripts") { send({ scripts: 1 }); $("#filter").focus(); }
+    store.set("norns-remote-tab", tab.dataset.tab);
+  });
+});
+
+// ---- keys and knobs ---------------------------------------------------------------
 // Keys: press and release, so holding K1 works as on the device.
 const held = new Set();
 function key(n, z) {
   if (z && held.has(n)) return;
   if (z) held.add(n); else if (!held.delete(n)) return;
-  document.querySelector(`.key[data-key="${n}"]`).classList.toggle("on", !!z);
+  $(`.key[data-key="${n}"]`).classList.toggle("on", !!z);
   send({ key: [n, z] });
 }
 
@@ -123,31 +447,31 @@ function key(n, z) {
 const angle = { 1: 0, 2: 0, 3: 0 };
 function enc(n, d) {
   angle[n] += d * 15;
-  document.querySelector(`.knob[data-enc="${n}"] .dial`).style.transform = `rotate(${angle[n]}deg)`;
+  $(`.knob[data-enc="${n}"] .dial`).style.transform = `rotate(${angle[n]}deg)`;
   send({ enc: [n, d] });
 }
 
-document.querySelectorAll(".key").forEach((el) => {
-  const n = +el.dataset.key;
-  el.addEventListener("pointerdown", (e) => { el.setPointerCapture(e.pointerId); key(n, 1); });
-  el.addEventListener("pointerup", () => key(n, 0));
-  el.addEventListener("pointercancel", () => key(n, 0));
+document.querySelectorAll(".key").forEach((k) => {
+  const n = +k.dataset.key;
+  k.addEventListener("pointerdown", (e) => { k.setPointerCapture(e.pointerId); key(n, 1); });
+  k.addEventListener("pointerup", () => key(n, 0));
+  k.addEventListener("pointercancel", () => key(n, 0));
 });
 
 // Drag up or scroll up turns clockwise (+1), like a plugin knob.
-document.querySelectorAll(".knob").forEach((el) => {
-  const n = +el.dataset.enc;
+document.querySelectorAll(".knob").forEach((k) => {
+  const n = +k.dataset.enc;
   let lastY = null, wheel = 0;
-  el.addEventListener("pointerdown", (e) => { el.setPointerCapture(e.pointerId); lastY = e.clientY; });
-  el.addEventListener("pointermove", (e) => {
+  k.addEventListener("pointerdown", (e) => { k.setPointerCapture(e.pointerId); lastY = e.clientY; });
+  k.addEventListener("pointermove", (e) => {
     if (lastY === null) return;
     const steps = Math.trunc((lastY - e.clientY) / 6);
     if (steps) { enc(n, steps); lastY -= steps * 6; }
   });
   const stop = () => { lastY = null; };
-  el.addEventListener("pointerup", stop);
-  el.addEventListener("pointercancel", stop);
-  el.addEventListener("wheel", (e) => {
+  k.addEventListener("pointerup", stop);
+  k.addEventListener("pointercancel", stop);
+  k.addEventListener("wheel", (e) => {
     e.preventDefault();
     wheel -= e.deltaY;
     const steps = Math.trunc(wheel / 40);
@@ -156,13 +480,15 @@ document.querySelectorAll(".knob").forEach((el) => {
 });
 
 // Physical key positions (e.code), so the map is the same on any keyboard layout.
+// A focused field of the panel (search box, menu, slider) keeps the keys to itself.
 const KEYS = { Tab: 1, Digit1: 1, Numpad1: 1, Escape: 2, Backspace: 2, Digit2: 2, Numpad2: 2,
   Enter: 3, NumpadEnter: 3, Digit3: 3, Numpad3: 3 };
 const ENCS = { ArrowUp: [2, -1], ArrowDown: [2, 1], ArrowLeft: [3, -1], ArrowRight: [3, 1],
   PageUp: [1, -1], PageDown: [1, 1] };
+const typing = (e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName);
 
 addEventListener("keydown", (e) => {
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
   let code = e.code;
   if (e.shiftKey && code === "ArrowUp") code = "PageUp";
   if (e.shiftKey && code === "ArrowDown") code = "PageDown";
@@ -173,6 +499,9 @@ addEventListener("keyup", (e) => { if (KEYS[e.code]) key(KEYS[e.code], 0); });
 // A key released while the window was in the background must not stay held.
 addEventListener("blur", () => { for (const n of [...held]) key(n, 0); });
 
+setTheme(store.get("norns-remote-theme") || "white");
+const savedTab = store.get("norns-remote-tab");
+if (savedTab && savedTab !== "scripts") document.querySelector(`.tab[data-tab="${savedTab}"]`)?.click();
 online(false);
 connect();
 </script>
