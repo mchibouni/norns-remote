@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>norns</title>
+<style>
+  :root {
+    --bg: #111;
+    --panel: #1d1d1d;
+    --edge: #2a2a2a;
+    --text: #8a8a8a;
+    --dim: #555;
+    --cap: #2b2b2b;
+    --cap-on: #e8e8e8;
+    --live: #6c6;
+    --dead: #c55;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+  body { display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .device { width: min(760px, 100%); background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 14px; padding: 22px 22px 16px; user-select: none; -webkit-user-select: none; }
+  .bezel { position: relative; background: #000; border-radius: 6px; padding: 5% 6%; }
+  canvas { display: block; width: 100%; aspect-ratio: 2 / 1; image-rendering: pixelated; }
+  .offline { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; color: var(--dim); font-size: 14px; }
+  .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 22px; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .knob { width: 64px; height: 64px; border-radius: 50%; background: var(--cap);
+    border: 1px solid #383838; position: relative; cursor: ns-resize; touch-action: none; }
+  .knob::after { content: ""; position: absolute; left: 50%; top: 6px; width: 3px; height: 16px;
+    margin-left: -1.5px; border-radius: 2px; background: #bbb; }
+  .knob .dial { position: absolute; inset: 0; transition: transform 60ms linear; }
+  .key { width: 40px; height: 40px; border-radius: 50%; background: var(--cap);
+    border: 1px solid #383838; cursor: pointer; touch-action: none; }
+  .key.on { background: var(--cap-on); }
+  .label { font-size: 11px; letter-spacing: .08em; color: var(--dim); }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 18px;
+    font-size: 11px; color: var(--dim); gap: 12px; flex-wrap: wrap; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--dead); margin-right: 6px; vertical-align: 1px; }
+  .dot.live { background: var(--live); }
+  kbd { font: 11px ui-monospace, monospace; color: var(--text); }
+</style>
+</head>
+<body>
+<div class="device">
+  <div class="bezel">
+    <canvas id="screen" width="128" height="64"></canvas>
+    <div class="offline" id="offline">connecting to norns…</div>
+  </div>
+  <div class="controls">
+    <div class="col"><div class="knob" data-enc="1"><div class="dial"></div></div><span class="label">E1</span>
+      <div class="key" data-key="1"></div><span class="label">K1</span></div>
+    <div class="col"><div class="knob" data-enc="2"><div class="dial"></div></div><span class="label">E2</span>
+      <div class="key" data-key="2"></div><span class="label">K2</span></div>
+    <div class="col"><div class="knob" data-enc="3"><div class="dial"></div></div><span class="label">E3</span>
+      <div class="key" data-key="3"></div><span class="label">K3</span></div>
+  </div>
+  <div class="foot">
+    <span><span class="dot" id="dot"></span><span id="status">offline</span></span>
+    <span>
+      <kbd>Tab</kbd> K1 · <kbd>Esc</kbd> K2 · <kbd>Enter</kbd> K3 ·
+      <kbd>Shift ↑↓</kbd> E1 · <kbd>↑↓</kbd> E2 · <kbd>←→</kbd> E3
+    </span>
+  </div>
+</div>
+<script>
+"use strict";
+// The relay sends 128x64 levels (0-15), zlib-compressed, only when the screen changes.
+const canvas = document.getElementById("screen");
+const ctx = canvas.getContext("2d");
+const image = ctx.createImageData(128, 64);
+const GRAY = Array.from({ length: 16 }, (_, v) => Math.round(255 * Math.pow(v / 15, 0.8)));
+
+let ws = null;
+let chain = Promise.resolve();
+
+async function inflate(buf) {
+  const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("deflate"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function draw(px) {
+  const d = image.data;
+  for (let i = 0, j = 0; i < 8192; i++, j += 4) {
+    const g = GRAY[px[i] & 15];
+    d[j] = g; d[j + 1] = g; d[j + 2] = g; d[j + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+}
+
+function online(yes) {
+  document.getElementById("dot").classList.toggle("live", yes);
+  document.getElementById("status").textContent = yes ? location.hostname : "offline";
+  document.getElementById("offline").style.display = yes ? "none" : "flex";
+}
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => online(true);
+  ws.onmessage = (e) => { chain = chain.then(() => inflate(e.data)).then(draw).catch(() => {}); };
+  ws.onclose = () => { online(false); setTimeout(connect, 1000); };
+}
+
+function send(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+
+// Keys: press and release, so holding K1 works as on the device.
+const held = new Set();
+function key(n, z) {
+  if (z && held.has(n)) return;
+  if (z) held.add(n); else if (!held.delete(n)) return;
+  document.querySelector(`.key[data-key="${n}"]`).classList.toggle("on", !!z);
+  send({ key: [n, z] });
+}
+
+// Knobs: the dial turns with every step, as a cue that the turn was sent.
+const angle = { 1: 0, 2: 0, 3: 0 };
+function enc(n, d) {
+  angle[n] += d * 15;
+  document.querySelector(`.knob[data-enc="${n}"] .dial`).style.transform = `rotate(${angle[n]}deg)`;
+  send({ enc: [n, d] });
+}
+
+document.querySelectorAll(".key").forEach((el) => {
+  const n = +el.dataset.key;
+  el.addEventListener("pointerdown", (e) => { el.setPointerCapture(e.pointerId); key(n, 1); });
+  el.addEventListener("pointerup", () => key(n, 0));
+  el.addEventListener("pointercancel", () => key(n, 0));
+});
+
+// Drag up or scroll up turns clockwise (+1), like a plugin knob.
+document.querySelectorAll(".knob").forEach((el) => {
+  const n = +el.dataset.enc;
+  let lastY = null, wheel = 0;
+  el.addEventListener("pointerdown", (e) => { el.setPointerCapture(e.pointerId); lastY = e.clientY; });
+  el.addEventListener("pointermove", (e) => {
+    if (lastY === null) return;
+    const steps = Math.trunc((lastY - e.clientY) / 6);
+    if (steps) { enc(n, steps); lastY -= steps * 6; }
+  });
+  const stop = () => { lastY = null; };
+  el.addEventListener("pointerup", stop);
+  el.addEventListener("pointercancel", stop);
+  el.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    wheel -= e.deltaY;
+    const steps = Math.trunc(wheel / 40);
+    if (steps) { enc(n, steps); wheel -= steps * 40; }
+  }, { passive: false });
+});
+
+// Physical key positions (e.code), so the map is the same on any keyboard layout.
+const KEYS = { Tab: 1, Digit1: 1, Numpad1: 1, Escape: 2, Backspace: 2, Digit2: 2, Numpad2: 2,
+  Enter: 3, NumpadEnter: 3, Digit3: 3, Numpad3: 3 };
+const ENCS = { ArrowUp: [2, -1], ArrowDown: [2, 1], ArrowLeft: [3, -1], ArrowRight: [3, 1],
+  PageUp: [1, -1], PageDown: [1, 1] };
+
+addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  let code = e.code;
+  if (e.shiftKey && code === "ArrowUp") code = "PageUp";
+  if (e.shiftKey && code === "ArrowDown") code = "PageDown";
+  if (KEYS[code]) { e.preventDefault(); if (!e.repeat) key(KEYS[code], 1); }
+  else if (ENCS[code]) { e.preventDefault(); enc(...ENCS[code]); }
+});
+addEventListener("keyup", (e) => { if (KEYS[e.code]) key(KEYS[e.code], 0); });
+// A key released while the window was in the background must not stay held.
+addEventListener("blur", () => { for (const n of [...held]) key(n, 0); });
+
+online(false);
+connect();
+</script>
+</body>
+</html>
