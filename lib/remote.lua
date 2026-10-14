@@ -159,11 +159,12 @@ end
 
 function R.tick()
   local now = util.time()
+  ticks = ticks + 1
+  if ticks % VALUES_EVERY == 3 and R.twister then R.twister() end
   if now - last_ping > IDLE then
     if vu_polls then stop_vu() end
     return
   end
-  ticks = ticks + 1
 
   -- Drawing runs on matron's screen thread; peek waits for every queued
   -- drawing call first, so it returns whole frames, never half-drawn ones.
@@ -222,6 +223,13 @@ function COMMANDS.set(args)
   params:set(i, v)
 end
 
+-- By parameter id, for tools that do not track indexes, e.g.
+-- /norns-remote/setid "monitor_level" -inf
+function COMMANDS.setid(args)
+  local id = tostring(args[1] or "")
+  if params.lookup[id] then params:set(id, args[2]) end
+end
+
 function COMMANDS.raw(args)
   local i, p = param(args[1])
   if p and (p.t == params.tCONTROL or p.t == params.tTAPER) then params:set_raw(i, args[2]) end
@@ -244,9 +252,154 @@ function COMMANDS.load(args)
   end
 end
 
-function R.osc(cmd, args)
-  local f = COMMANDS[cmd]
-  if f then f(args) end
+-- Network MIDI ---------------------------------------------------------------
+-- A MIDI device that lives on another computer: its messages arrive as OSC
+-- /norns-remote/midi with the bytes as arguments, and what the norns sends to
+-- it goes back as /norns-remote/midi to whoever sent the last message. To the
+-- norns it is an ordinary device, so MIDI learn (PARAMETERS > MAP), scripts'
+-- device menus, and scripts that look for a device by name all work.
+-- Hammerspoon on the Mac presents a Midi Fighter Twister this way.
+local NET_ID = 9001   -- device ids from matron are small; this one never clashes
+local NET_NAME = "Midi Fighter Twister"
+local reply_to = nil
+
+local function net_device()
+  if not midi.devices[NET_ID] then _norns.midi.add(NET_ID, NET_NAME, "norns-remote") end
+  local d = midi.devices[NET_ID]
+  -- The C side cannot send to or clock a device it does not know.
+  d.send = function(_, data)
+    if data.type then data = midi.to_data(data) end
+    if reply_to then osc.send(reply_to, "/norns-remote/midi", data) end
+  end
+  d.clock_receive = function() end
+  -- norns restores its saved port list after the mods start, so the port
+  -- that adding the device claims is gone again: claim the first free one.
+  local ported = false
+  for i = 1, 16 do ported = ported or midi.vports[i].name == d.name end
+  for i = 1, 16 do
+    if not ported and midi.vports[i].name == "none" then
+      midi.vports[i].name, ported = d.name, true
+    end
+  end
+  midi.update_devices()
+  return d
 end
+
+-- Twister auto-map: knobs 1-16 play the first 16 settings of whatever script is
+-- loaded, with rings showing where each one is and mapped knobs lit (unused ones
+-- dark). A knob mapped with the norns' own MIDI learn (PARAMETERS > MAP) belongs
+-- to that mapping instead, and scripts written for the Twister (they name it in
+-- their source, as haze does) drive it themselves: the auto-map stays off.
+-- Knob values arrive as absolute 0-127 (a factory Twister); only their change
+-- is used, as steps of each setting's own size, and the ring value sent back
+-- re-centres the knob on the setting, so a setting never runs out of knob.
+local SYSTEM_GROUPS = {LEVELS = true, REVERB = true, COMPRESSOR = true, SOFTCUT = true, CLOCK = true}
+local KNOB_COLOR = 70  -- Twister hue for a mapped knob
+local SLOW = {[params.tNUMBER] = 3, [params.tOPTION] = 4, [params.tBINARY] = 6}  -- ticks per step
+local automap = {knobs = {}}
+local knob_last, knob_shown, knob_color, knob_acc = {}, {}, {}, {}
+
+local function mappable(i, p)
+  if not params:visible(i) then return false end
+  if p.t == params.tBINARY then return p.behavior == "toggle" end
+  return p.t == params.tCONTROL or p.t == params.tTAPER or p.t == params.tNUMBER
+      or p.t == params.tOPTION
+end
+
+local function twister_aware()
+  local f = norns.state.script and io.open(norns.state.script)
+  if not f then return false end
+  local source = f:read("a")
+  f:close()
+  return source:find("Midi Fighter Twister", 1, true) ~= nil
+end
+
+local function build_automap()
+  local key = params_key()
+  if automap.key == key then return end
+  automap = {key = key, knobs = {}, aware = twister_aware()}
+  local i = 1
+  while i <= params.count and #automap.knobs < 16 do
+    local p = params.params[i]
+    if p and p.t == params.tGROUP and SYSTEM_GROUPS[p.name] then
+      i = i + p.n  -- the mixer and clock are not the script's
+    elseif p and mappable(i, p) then
+      automap.knobs[#automap.knobs + 1] = i
+    end
+    i = i + 1
+  end
+  knob_shown, knob_color, knob_acc = {}, {}, {}
+end
+
+local function learned(knob)
+  local port = midi.devices[NET_ID] and midi.devices[NET_ID].port
+  local rev = port and norns.pmap.rev[port]
+  return rev and rev[1] and rev[1][knob - 1] ~= nil
+end
+
+local function position(p)
+  if p.t == params.tCONTROL or p.t == params.tTAPER then return p:get_raw() end
+  if p.t == params.tOPTION then return p.count > 1 and (p.selected - 1) / (p.count - 1) or 0 end
+  if p.t == params.tBINARY then return p.value > 0 and 1 or 0 end
+  local range = p.max - p.min
+  return range > 0 and (p.value - p.min) / range or 0
+end
+
+local function knob_turned(knob, value)
+  build_automap()
+  local last = knob_last[knob]
+  knob_last[knob] = value
+  local i = automap.knobs[knob]
+  if automap.aware or not i or not last or learned(knob) then return end
+  local d = value - last
+  if d == 0 then return end
+  local p = params.params[i]
+  local per = SLOW[p.t]
+  if not per then return params:delta(i, d) end
+  local acc = (knob_acc[knob] or 0) + d
+  local steps = acc >= 0 and math.floor(acc / per) or -math.floor(-acc / per)
+  knob_acc[knob] = acc - steps * per
+  if steps == 0 then return end
+  if p.t == params.tBINARY then params:set(i, steps > 0 and 1 or 0) else params:delta(i, steps) end
+end
+
+-- Rings and colors, 5 times a second, only for what changed.
+local function update_twister()
+  if not reply_to then return end
+  build_automap()
+  if automap.aware then return end
+  local d = midi.devices[NET_ID]
+  for knob = 1, 16 do
+    local i = automap.knobs[knob]
+    local on = i and not learned(knob)
+    local value = on and math.floor(position(params.params[i]) * 127 + 0.5) or 0
+    if knob_shown[knob] ~= value then
+      d:cc(knob - 1, value, 1)
+      knob_shown[knob], knob_last[knob] = value, value
+    end
+    local color = on and KNOB_COLOR or 0
+    if knob_color[knob] ~= color then
+      d:cc(knob - 1, color, 2)
+      knob_color[knob] = color
+    end
+  end
+end
+R.twister = update_twister
+
+function COMMANDS.midi(args, from)
+  if from then reply_to = from end
+  local data = {}
+  for k, v in ipairs(args) do data[k] = math.floor(v) end
+  if #data == 0 then return end
+  _norns.midi.event(NET_ID, data)
+  if data[1] == 0xB0 and data[2] < 16 then knob_turned(data[2] + 1, data[3]) end
+end
+
+function R.osc(cmd, args, from)
+  local f = COMMANDS[cmd]
+  if f then f(args, from) end
+end
+
+net_device()
 
 return R

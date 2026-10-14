@@ -57,6 +57,25 @@ keyboard map uses key positions, so it is the same on any keyboard layout. One k
 step is one step on the norns: the norns needs several encoder ticks per step
 (8 for E1 in the menus), and the mod sends as many as the current setting needs.
 
+## A MIDI controller over the network
+
+The mod adds a MIDI device to the norns, "Midi Fighter Twister" on port 1, whose
+messages come over the network: OSC `/norns-remote/midi` to port 10111, with the MIDI
+bytes as integer arguments. What the norns sends to it goes back the same way, to
+whoever sent the last message. To the norns it is an ordinary device, so MIDI learn
+(PARAMETERS > MAP) and scripts that look for a Twister by name (haze) work as with a
+real one. A controller on another computer can be plugged in this way; send it as a
+factory-configured Twister: knobs absolute 0-127 on channel 1 (CC 0-15), pushes on
+channel 2.
+
+Its knobs play the first 16 settings of whatever script is loaded (the auto-map), with
+ring values (channel 1) and colors (channel 2) sent back. A knob mapped with MIDI learn
+follows that mapping instead, and scripts that name the Twister in their source drive
+it themselves.
+
+`/norns-remote/setid <id> <value>` sets a parameter by its id, for tools that do not
+track parameter indexes.
+
 ## How it works
 
 - `lib/mod.lua`, the mod: starts the relay and hooks `lib/remote.lua` into matron.

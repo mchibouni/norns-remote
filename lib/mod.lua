@@ -26,7 +26,7 @@ mod.hook.register("system_post_startup", "norns-remote", function()
   local osc_event = _norns.osc.event
   _norns.osc.event = function(path, args, from)
     if path:sub(1, 14) == "/norns-remote/" then
-      guarded("osc", function() norns_remote.osc(path:sub(15), args) end)
+      guarded("osc", function() norns_remote.osc(path:sub(15), args, from) end)
       return
     end
     osc_event(path, args, from)
